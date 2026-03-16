@@ -1,7 +1,6 @@
 const express = require('express');
 const cors = require('cors');
 const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode');
 const { v4: uuidv4 } = require('uuid');
 const http = require('http');
 const socketIo = require('socket.io');
@@ -55,12 +54,12 @@ function createWhatsAppClient(sessionId, phoneNumber, socket) {
         }
     });
 
-    client.on('qr', async (qr) => {
-        console.log(`QR generated for session ${sessionId}`);
-        const qrDataUrl = await qrcode.toDataURL(qr);
-        
-        if (socket) {
-            socket.emit('qr', { sessionId, qr: qrDataUrl });
+    // This is the key part - handle the authentication code
+    client.on('authenticated', () => {
+        console.log(`Client ${sessionId} authenticated`);
+        const session = activeSessions.get(sessionId);
+        if (session) {
+            session.status = 'authenticated';
         }
     });
 
@@ -89,6 +88,26 @@ function createWhatsAppClient(sessionId, phoneNumber, socket) {
         
         if (socket) {
             socket.emit('ready', { sessionId, phoneNumber: session?.phoneNumber });
+        }
+    });
+
+    client.on('auth_failure', (msg) => {
+        console.error(`Auth failure for session ${sessionId}:`, msg);
+        const session = activeSessions.get(sessionId);
+        if (session) {
+            session.status = 'auth_failed';
+            session.error = msg;
+        }
+        if (socket) {
+            socket.emit('auth_failure', { sessionId, error: msg });
+        }
+    });
+
+    client.on('disconnected', (reason) => {
+        console.log(`Client ${sessionId} disconnected:`, reason);
+        const session = activeSessions.get(sessionId);
+        if (session) {
+            session.status = 'disconnected';
         }
     });
 
@@ -126,12 +145,6 @@ function createWhatsAppClient(sessionId, phoneNumber, socket) {
         }
     });
 
-    client.on('disconnected', (reason) => {
-        console.log(`Client ${sessionId} disconnected:`, reason);
-        const session = activeSessions.get(sessionId);
-        if (session) session.status = 'disconnected';
-    });
-
     return client;
 }
 
@@ -162,12 +175,13 @@ app.post('/api/init-session', (req, res) => {
         const client = createWhatsAppClient(sessionId, cleanNumber, socket);
         activeSessions.get(sessionId).client = client;
         
+        // Initialize client
         client.initialize();
 
         res.json({ 
             success: true, 
             sessionId,
-            message: 'Session initializing'
+            message: 'Session initializing. Check your WhatsApp for the code.'
         });
 
     } catch (error) {
@@ -222,7 +236,7 @@ app.get('/api/session-status/:sessionId', (req, res) => {
     });
 });
 
-// Health check for pinger
+// Health check
 app.get('/health', (req, res) => {
     res.json({ status: 'alive', sessions: activeSessions.size });
 });
