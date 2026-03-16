@@ -13,6 +13,9 @@
     "whatsapp-web.js": "^1.23.0",
     "qrcode": "^1.5.3",
     "socket.io": "^4.6.1",
-    "puppeteer": "^21.0.0"
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
